@@ -164,7 +164,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate, onOpenReservatio
                 className="px-6 py-3 sm:px-7 sm:py-3.5 text-xs sm:text-sm font-semibold text-white bg-[#B86B35] hover:bg-[#A25B2A] rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2 group cursor-pointer"
               >
                 <UtensilsCrossed className="w-4 h-4 transition-transform group-hover:scale-110" />
-                <span>View Menu</span>
+                <span>Open Menu</span>
                 <ExternalLink className="w-3.5 h-3.5 opacity-80 group-hover:opacity-100" />
               </a>
             </div>
