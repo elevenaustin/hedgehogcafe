@@ -16,6 +16,12 @@ import {
   FoodOrder,
   Booking,
   VisitorStats,
+  getSupabaseConfig,
+  saveSupabaseConfig,
+  clearSupabaseConfig,
+  testSupabaseConnection,
+  syncOrdersFromSupabase,
+  syncBookingsFromSupabase,
 } from '../services/adminStorage';
 import {
   Crown,
@@ -48,7 +54,14 @@ import {
   Save,
   Check,
   X,
-  Plus
+  Plus,
+  Database,
+  Server,
+  Radio,
+  RefreshCw,
+  Copy,
+  CheckCheck,
+  ExternalLink
 } from 'lucide-react';
 
 interface SuperAdminViewProps {
@@ -91,12 +104,142 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
     status: 'Active' as AdminAccount['status'],
   });
 
+  // Supabase Cloud Configuration State
+  const [supabaseConfig, setSupabaseConfig] = useState(() => getSupabaseConfig());
+  const [supabaseUrlInput, setSupabaseUrlInput] = useState(supabaseConfig.url || '');
+  const [supabaseKeyInput, setSupabaseKeyInput] = useState(supabaseConfig.anonKey || '');
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
+
   // Reload everything
   const reloadSuperAdminData = () => {
     setSettings(getWebsiteSettings());
     setAdmins(getAdminAccounts());
     setAuditLogs(getAuditLogs());
+    setSupabaseConfig(getSupabaseConfig());
     onRefreshData();
+  };
+
+  // Test Supabase Cloud Connection
+  const handleTestSupabase = async () => {
+    setIsTestingConnection(true);
+    setTestResult(null);
+    try {
+      const res = await testSupabaseConnection();
+      setTestResult(res);
+      if (res.success) {
+        showToast('🟢 ' + res.message, 'success');
+      } else {
+        showToast('⚠️ ' + res.message, 'error');
+      }
+    } catch (e: any) {
+      setTestResult({ success: false, message: e.message || 'Connection test failed' });
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
+  // Save Supabase Credentials
+  const handleSaveSupabaseConfig = (e: React.FormEvent) => {
+    e.preventDefault();
+    saveSupabaseConfig(supabaseUrlInput, supabaseKeyInput);
+    const updated = getSupabaseConfig();
+    setSupabaseConfig(updated);
+    showToast(
+      updated.isConfigured
+        ? 'Supabase credentials saved! Connecting to cloud...'
+        : 'Supabase credentials cleared. Switched to local offline mode.',
+      'info'
+    );
+    handleTestSupabase();
+  };
+
+  // Sync Live Cloud Data on Demand
+  const handleManualCloudSync = async () => {
+    setIsSyncingCloud(true);
+    try {
+      await Promise.all([syncOrdersFromSupabase(), syncBookingsFromSupabase()]);
+      onRefreshData();
+      showToast('⚡ Live orders & bookings synchronized from Supabase cloud!', 'success');
+    } catch (e) {
+      showToast('Failed to sync from cloud', 'error');
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
+  // Copy SQL Schema to Clipboard
+  const handleCopySqlSchema = () => {
+    const sqlSchema = `-- The Hedgehog Café - Supabase Schema
+CREATE TABLE IF NOT EXISTS public.orders (
+    id TEXT PRIMARY KEY,
+    customer_name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    email TEXT,
+    address TEXT NOT NULL,
+    city TEXT DEFAULT 'Chandigarh',
+    order_type TEXT NOT NULL DEFAULT 'Delivery',
+    table_number TEXT,
+    items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    subtotal NUMERIC(10,2) NOT NULL DEFAULT 0,
+    delivery_fee NUMERIC(10,2) NOT NULL DEFAULT 0,
+    total_amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+    payment_method TEXT NOT NULL DEFAULT 'UPI on Delivery',
+    notes TEXT,
+    status TEXT NOT NULL DEFAULT 'New',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.bookings (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    email TEXT,
+    guests TEXT NOT NULL DEFAULT '2',
+    date TEXT NOT NULL,
+    time_slot TEXT NOT NULL,
+    seating_preference TEXT DEFAULT 'Near Bookshelves',
+    notes TEXT,
+    status TEXT NOT NULL DEFAULT 'Pending',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.website_settings (
+    id TEXT PRIMARY KEY DEFAULT 'default',
+    is_online BOOLEAN NOT NULL DEFAULT true,
+    offline_reason TEXT DEFAULT '',
+    announcement TEXT DEFAULT '',
+    phone TEXT DEFAULT '+91 172 473 0478',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bookings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.website_settings ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public can insert orders" ON public.orders FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public can view orders" ON public.orders FOR SELECT USING (true);
+CREATE POLICY "Public can update orders" ON public.orders FOR UPDATE USING (true);
+CREATE POLICY "Public can delete orders" ON public.orders FOR DELETE USING (true);
+
+CREATE POLICY "Public can insert bookings" ON public.bookings FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public can view bookings" ON public.bookings FOR SELECT USING (true);
+CREATE POLICY "Public can update bookings" ON public.bookings FOR UPDATE USING (true);
+CREATE POLICY "Public can delete bookings" ON public.bookings FOR DELETE USING (true);
+
+CREATE POLICY "Public can view settings" ON public.website_settings FOR SELECT USING (true);
+CREATE POLICY "Public can update settings" ON public.website_settings FOR ALL USING (true);
+
+ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.bookings;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.website_settings;`;
+
+    navigator.clipboard.writeText(sqlSchema);
+    setCopiedSql(true);
+    showToast('📋 Supabase SQL Schema copied to clipboard!', 'success');
+    setTimeout(() => setCopiedSql(false), 3000);
   };
 
   // Toggle Website Master Power Switch (ONLINE / OFFLINE)
@@ -703,6 +846,140 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
             </div>
           ))}
         </div>
+      </div>
+
+      {/* ------------------------------------------------------------- */}
+      {/* SECTION 4: SUPABASE CLOUD DATABASE & LIVE REALTIME SYNC */}
+      {/* ------------------------------------------------------------- */}
+      <div className="bg-[#241D18] border border-[#3D3128] rounded-3xl p-6 sm:p-7 shadow-lg space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-[#3D3128]">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400">
+              <Database className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-serif text-lg sm:text-xl font-bold text-[#F7F3EC]">
+                  Supabase Cloud Database & Live Sync
+                </h3>
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${
+                    supabaseConfig.isConfigured
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                      : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  }`}
+                >
+                  {supabaseConfig.isConfigured ? '🟢 Cloud Active' : '🟡 Local Storage Mode'}
+                </span>
+              </div>
+              <p className="text-xs text-[#A69485]">
+                Connect Supabase PostgreSQL to receive customer orders and table reservations in real-time across all devices.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleManualCloudSync}
+              disabled={isSyncingCloud}
+              className="px-3.5 py-2 rounded-xl bg-[#2D241E] hover:bg-[#3D3128] text-xs font-semibold text-[#E0D8CE] border border-[#4A3C32] flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+              <span>{isSyncingCloud ? 'Syncing...' : 'Sync Cloud Now'}</span>
+            </button>
+            <button
+              onClick={handleCopySqlSchema}
+              className="px-3.5 py-2 rounded-xl bg-[#2D241E] hover:bg-[#3D3128] text-xs font-semibold text-[#E0D8CE] border border-[#4A3C32] flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              {copiedSql ? (
+                <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
+              ) : (
+                <Copy className="w-3.5 h-3.5 text-[#B86B35]" />
+              )}
+              <span>{copiedSql ? 'SQL Copied!' : 'Copy SQL Schema'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Credentials Form */}
+        <form onSubmit={handleSaveSupabaseConfig} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-[#D9CFC1] mb-1.5">
+                Supabase Project URL (VITE_SUPABASE_URL)
+              </label>
+              <input
+                type="url"
+                placeholder="https://your-project.supabase.co"
+                value={supabaseUrlInput}
+                onChange={(e) => setSupabaseUrlInput(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-[#181513] border border-[#4A3C32] rounded-xl text-xs text-white placeholder-stone-600 focus:outline-none focus:border-emerald-500 font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-[#D9CFC1] mb-1.5">
+                Supabase Anon Public API Key (VITE_SUPABASE_ANON_KEY)
+              </label>
+              <input
+                type="password"
+                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                value={supabaseKeyInput}
+                onChange={(e) => setSupabaseKeyInput(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-[#181513] border border-[#4A3C32] rounded-xl text-xs text-white placeholder-stone-600 focus:outline-none focus:border-emerald-500 font-mono"
+              />
+            </div>
+          </div>
+
+          {/* Test connection result banner */}
+          {testResult && (
+            <div
+              className={`p-3.5 rounded-xl border text-xs flex items-center gap-2.5 ${
+                testResult.success
+                  ? 'bg-emerald-950/40 border-emerald-800/80 text-emerald-200'
+                  : 'bg-rose-950/40 border-rose-800/80 text-rose-200'
+              }`}
+            >
+              {testResult.success ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+              )}
+              <span>{testResult.message}</span>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+            <div className="flex items-center gap-2">
+              <button
+                type="submit"
+                className="px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold shadow-md transition-all cursor-pointer flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                <span>Save & Connect Supabase</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleTestSupabase}
+                disabled={isTestingConnection}
+                className="px-4 py-2.5 rounded-xl bg-[#2D241E] hover:bg-[#3D3128] text-[#D9CFC1] text-xs font-bold border border-[#4A3C32] transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
+              >
+                <Radio className={`w-4 h-4 text-amber-400 ${isTestingConnection ? 'animate-pulse' : ''}`} />
+                <span>{isTestingConnection ? 'Testing...' : 'Test Connection'}</span>
+              </button>
+            </div>
+
+            <a
+              href="https://supabase.com/dashboard"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-[#B86B35] hover:text-[#D9874D] flex items-center gap-1 font-medium transition-colors"
+            >
+              <span>Open Supabase Dashboard</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        </form>
       </div>
 
       {/* ------------------------------------------------------------- */}

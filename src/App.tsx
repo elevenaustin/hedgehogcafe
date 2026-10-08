@@ -20,6 +20,7 @@ import {
   recordPageView,
   getWebsiteSettings,
   subscribeToWebsiteSettings,
+  initSupabaseRealtime,
   WebsiteSettings
 } from './services/adminStorage';
 import { HedgehogLogo } from './components/HedgehogMotif';
@@ -44,6 +45,14 @@ function MainApp() {
   const [websiteSettings, setWebsiteSettings] = useState<WebsiteSettings>(() => getWebsiteSettings());
   const [isBannerDismissed, setIsBannerDismissed] = useState(false);
   const { isCartOpen, setIsCartOpen, openCart, closeCart } = useCart();
+
+  // Initialize Supabase Cloud Live Realtime Sync
+  useEffect(() => {
+    const unsubRealtime = initSupabaseRealtime();
+    return () => {
+      if (unsubRealtime) unsubRealtime();
+    };
+  }, []);
 
   // Listen for live website setting changes (e.g. Super Admin turning website ON/OFF)
   useEffect(() => {

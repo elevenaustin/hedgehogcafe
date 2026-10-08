@@ -20,6 +20,9 @@ import {
   resetDemoData,
   isValidIndianPhone,
   formatPhoneNumber,
+  getSupabaseConfig,
+  syncOrdersFromSupabase,
+  syncBookingsFromSupabase,
 } from '../services/adminStorage';
 import { SuperAdminView } from './SuperAdminView';
 import { HedgehogLogo } from './HedgehogMotif';
@@ -71,7 +74,8 @@ import {
   Wallet,
   Crown,
   Power,
-  Key
+  Key,
+  Database
 } from 'lucide-react';
 
 interface AdminPanelProps {
@@ -138,12 +142,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose, onNavigateHome 
   });
   const [manualPhoneTouched, setManualPhoneTouched] = useState(false);
 
-  // Load Data on mount or tab change
+  const [supabaseConfig, setSupabaseConfig] = useState(() => getSupabaseConfig());
+
+  // Load Data on mount or tab change (with live background cloud sync)
   const refreshData = () => {
     setFoodOrders(getFoodOrders());
     setBookings(getBookings());
     setVisitorStats(getVisitorStats());
     setWebsiteSettings(getWebsiteSettings());
+    setSupabaseConfig(getSupabaseConfig());
+
+    // Pull real-time data from Supabase
+    syncOrdersFromSupabase().then((latest) => {
+      if (latest && latest.length > 0) setFoodOrders(latest);
+    });
+    syncBookingsFromSupabase().then((latest) => {
+      if (latest && latest.length > 0) setBookings(latest);
+    });
   };
 
   useEffect(() => {
@@ -589,9 +604,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose, onNavigateHome 
               <span>{websiteSettings.isWebsiteOnline ? 'Site: LIVE' : 'Site: OFFLINE'}</span>
             </button>
 
+            {/* Supabase Cloud Sync Status */}
+            <div
+              title={
+                supabaseConfig.isConfigured
+                  ? 'Connected to Supabase PostgreSQL Cloud Database'
+                  : 'Running in Local Browser Storage Mode'
+              }
+              className={`hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border ${
+                supabaseConfig.isConfigured
+                  ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/80'
+                  : 'bg-amber-950/40 text-amber-300 border-amber-800/80'
+              }`}
+            >
+              <Database className={`w-3.5 h-3.5 ${supabaseConfig.isConfigured ? 'text-emerald-400' : 'text-amber-400'}`} />
+              <span>{supabaseConfig.isConfigured ? 'Cloud Sync' : 'Local Mode'}</span>
+            </div>
+
             <button
               onClick={refreshData}
-              title="Refresh Live Data"
+              title="Refresh & Pull Cloud Data"
               className="p-2 rounded-lg bg-[#2D241E] hover:bg-[#3D3128] text-[#D9CFC1] hover:text-white transition-colors border border-[#4A3C32] cursor-pointer"
             >
               <RotateCcw className="w-4 h-4" />

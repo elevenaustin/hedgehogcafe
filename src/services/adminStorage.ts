@@ -1,6 +1,21 @@
 /**
- * Storage and Analytics Service for The Hedgehog Café Admin Panel
+ * Storage, Supabase Cloud Sync and Analytics Service for The Hedgehog Café Admin Panel
  */
+
+import {
+  getSupabaseClient,
+  getSupabaseConfig,
+  saveSupabaseConfig,
+  clearSupabaseConfig,
+  testSupabaseConnection,
+} from './supabaseClient';
+
+export {
+  getSupabaseConfig,
+  saveSupabaseConfig,
+  clearSupabaseConfig,
+  testSupabaseConnection,
+};
 
 export interface Booking {
   id: string;
@@ -99,7 +114,7 @@ export interface AdminAccount {
   id: string;
   name: string;
   username: string;
-  role: 'Super Admin' | 'Store Manager' | 'Kitchen Admin' | 'Reservation Staff';
+  role: 'Super Admin' | 'Store Manager' | 'Kitchen Lead' | 'Support Host';
   passcode: string;
   status: 'Active' | 'Suspended';
   createdAt: string;
@@ -109,43 +124,38 @@ export interface AdminAccount {
 }
 
 export interface WebsiteSettings {
-  isWebsiteOnline: boolean; // True = Live, False = Maintenance / Closed
-  maintenanceMessage: string;
+  isWebsiteOnline: boolean;
+  offlineReason?: string;
   isOrderingEnabled: boolean;
-  orderingDisabledMessage: string;
   isReservationsEnabled: boolean;
-  announcementBanner: {
+  announcementBanner?: {
     enabled: boolean;
     text: string;
-    type: 'info' | 'warning' | 'discount' | 'special';
+    type: 'info' | 'warning' | 'special';
   };
-  lastModifiedBy?: string;
-  lastModifiedAt?: string;
+  lastModifiedBy: string;
+  lastModifiedAt: string;
 }
 
 export interface AuditLog {
   id: string;
-  category: 'AUTH' | 'ORDER' | 'BOOKING' | 'SYSTEM' | 'ADMIN' | 'SETTINGS';
+  category: 'AUTH' | 'SETTINGS' | 'ORDER' | 'BOOKING' | 'ADMIN' | 'SYSTEM';
   action: string;
-  performedBy: string;
   details: string;
+  performedBy: string;
   timestamp: string;
 }
 
 const STORAGE_KEYS = {
-  BOOKINGS: 'hedgehog_cafe_bookings',
-  FOOD_ORDERS: 'hedgehog_cafe_food_orders',
-  VISITOR_ID: 'hedgehog_visitor_id',
+  BOOKINGS: 'hedgehog_bookings',
   VISITOR_LOGS: 'hedgehog_visitor_logs',
-  SESSION_VISITED_TODAY: 'hedgehog_session_today',
-  ADMIN_AUTH: 'hedgehog_admin_authenticated',
-  SUPER_ADMIN_AUTH: 'hedgehog_super_admin_authenticated',
+  FOOD_ORDERS: 'hedgehog_food_orders',
   CUSTOMER_ORDER_IDS: 'hedgehog_customer_order_ids',
   CUSTOMER_PHONE: 'hedgehog_customer_phone',
-  LAST_UPDATED: 'hedgehog_orders_last_updated',
   ADMIN_ACCOUNTS: 'hedgehog_admin_accounts',
   WEBSITE_SETTINGS: 'hedgehog_website_settings',
   AUDIT_LOGS: 'hedgehog_audit_logs',
+  LAST_UPDATED: 'hedgehog_last_updated',
 };
 
 // Seed initial orders for realistic demonstration
@@ -167,7 +177,7 @@ const INITIAL_ORDERS: FoodOrder[] = [
     paymentMethod: 'UPI on Delivery',
     notes: 'Please make pasta extra creamy and deliver hot.',
     status: 'New',
-    createdAt: new Date(Date.now() - 1000 * 60 * 18).toISOString(), // 18 mins ago
+    createdAt: new Date(Date.now() - 1000 * 60 * 18).toISOString(),
   },
   {
     id: 'ORD-7820',
@@ -185,7 +195,7 @@ const INITIAL_ORDERS: FoodOrder[] = [
     paymentMethod: 'Cash on Delivery',
     notes: 'Please send cutlery with the order.',
     status: 'Preparing',
-    createdAt: new Date(Date.now() - 1000 * 60 * 42).toISOString(), // 42 mins ago
+    createdAt: new Date(Date.now() - 1000 * 60 * 42).toISOString(),
   },
   {
     id: 'ORD-7819',
@@ -207,7 +217,7 @@ const INITIAL_ORDERS: FoodOrder[] = [
   }
 ];
 
-// Seed initial bookings for realistic demonstration if none exist
+// Seed initial bookings
 const INITIAL_BOOKINGS: Booking[] = [
   {
     id: 'BK-1082',
@@ -274,7 +284,7 @@ const INITIAL_BOOKINGS: Booking[] = [
   },
 ];
 
-// Helper to get device & browser details safely
+// Device details helper
 function getDeviceDetails(): { browser: string; os: string; deviceType: 'Mobile' | 'Tablet' | 'Desktop' } {
   if (typeof window === 'undefined') {
     return { browser: 'Chrome', os: 'Windows', deviceType: 'Desktop' };
@@ -298,24 +308,24 @@ function getDeviceDetails(): { browser: string; os: string; deviceType: 'Mobile'
   else if (ua.indexOf('like Mac') > -1 || ua.indexOf('iPhone') > -1 || ua.indexOf('iPad') > -1) os = 'iOS';
 
   let deviceType: 'Mobile' | 'Tablet' | 'Desktop' = 'Desktop';
-  if (/(tablet|ipad|playbook|silk)|(android(?!.*mobi))/i.test(ua)) {
-    deviceType = 'Tablet';
-  } else if (/Mobile|iP(hone|od)|Android|BlackBerry|IEMobile|Kindle|Silk-Accelerated|(hpw|web)OS|Opera M(obi|ini)/i.test(ua)) {
+  if (/Mobi|Android|iPhone/i.test(ua)) {
     deviceType = 'Mobile';
+  } else if (/iPad|Tablet/i.test(ua)) {
+    deviceType = 'Tablet';
   }
 
   return { browser, os, deviceType };
 }
 
-// Generate unique visitor UUID
-export function getOrCreateVisitorId(): string {
-  if (typeof window === 'undefined') return 'vis-server';
-  let visId = localStorage.getItem(STORAGE_KEYS.VISITOR_ID);
-  if (!visId) {
-    visId = 'vis_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
-    localStorage.setItem(STORAGE_KEYS.VISITOR_ID, visId);
+// Visitor unique token
+function getOrCreateVisitorId(): string {
+  if (typeof window === 'undefined') return 'visitor_node';
+  let vId = localStorage.getItem('hedgehog_vid');
+  if (!vId) {
+    vId = 'vis_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
+    localStorage.setItem('hedgehog_vid', vId);
   }
-  return visId;
+  return vId;
 }
 
 // Record a page view / visitor hit
@@ -339,7 +349,6 @@ export function recordPageView(pageName: string): void {
     const logsJson = localStorage.getItem(STORAGE_KEYS.VISITOR_LOGS);
     let logs: VisitorLog[] = logsJson ? JSON.parse(logsJson) : [];
     
-    // Prepend new log and keep up to 250 records
     logs.unshift(newLog);
     if (logs.length > 250) {
       logs = logs.slice(0, 250);
@@ -368,7 +377,6 @@ export function getVisitorStats(): VisitorStats {
     const logsJson = localStorage.getItem(STORAGE_KEYS.VISITOR_LOGS);
     let logs: VisitorLog[] = logsJson ? JSON.parse(logsJson) : [];
 
-    // If no logs yet, generate sample logs for the past 7 days to give admin immediate context
     if (logs.length === 0) {
       logs = generateSampleVisitorLogs();
       localStorage.setItem(STORAGE_KEYS.VISITOR_LOGS, JSON.stringify(logs));
@@ -381,7 +389,6 @@ export function getVisitorStats(): VisitorStats {
     const pageBreakdown: Record<string, number> = {};
     const dailyMap: Record<string, { total: number; uniqueVisitors: Set<string> }> = {};
 
-    // Initialize last 7 days in dailyMap
     for (let i = 6; i >= 0; i--) {
       const d = new Date(Date.now() - i * 86400000).toISOString().split('T')[0];
       dailyMap[d] = { total: 0, uniqueVisitors: new Set() };
@@ -396,11 +403,9 @@ export function getVisitorStats(): VisitorStats {
         todayPageViews++;
       }
 
-      // Page breakdown
       const pageKey = log.page.charAt(0).toUpperCase() + log.page.slice(1);
       pageBreakdown[pageKey] = (pageBreakdown[pageKey] || 0) + 1;
 
-      // Daily breakdown
       if (!dailyMap[logDate]) {
         dailyMap[logDate] = { total: 0, uniqueVisitors: new Set() };
       }
@@ -444,7 +449,6 @@ export function getVisitorStats(): VisitorStats {
   }
 }
 
-// Generate realistic background visitor sample data
 function generateSampleVisitorLogs(): VisitorLog[] {
   const pages = ['home', 'menu', 'story', 'gallery', 'visit'];
   const browsers = ['Google Chrome', 'Apple Safari', 'Microsoft Edge', 'Firefox', 'Samsung Internet'];
@@ -454,7 +458,6 @@ function generateSampleVisitorLogs(): VisitorLog[] {
   const sampleLogs: VisitorLog[] = [];
   const now = Date.now();
 
-  // Create 45 historical visits across past 6 days
   for (let i = 0; i < 45; i++) {
     const hoursAgo = Math.floor(Math.random() * 140);
     const visNum = Math.floor(Math.random() * 18) + 1;
@@ -469,81 +472,14 @@ function generateSampleVisitorLogs(): VisitorLog[] {
     });
   }
 
-  // Sort newest first
   return sampleLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-}
-
-// BOOKINGS MANAGEMENT
-
-// Get all bookings
-export function getBookings(): Booking[] {
-  if (typeof window === 'undefined') return INITIAL_BOOKINGS;
-
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.BOOKINGS);
-    if (!raw) {
-      localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(INITIAL_BOOKINGS));
-      return INITIAL_BOOKINGS;
-    }
-    return JSON.parse(raw);
-  } catch (e) {
-    console.error('Error fetching bookings:', e);
-    return INITIAL_BOOKINGS;
-  }
-}
-
-// Save a new booking from form
-export function saveBooking(booking: Omit<Booking, 'id' | 'createdAt' | 'status'> & { status?: Booking['status'] }): Booking {
-  const bookings = getBookings();
-  const newBooking: Booking = {
-    ...booking,
-    id: 'BK-' + Math.floor(1000 + Math.random() * 9000),
-    status: booking.status || 'Pending',
-    createdAt: new Date().toISOString(),
-  };
-
-  const updated = [newBooking, ...bookings];
-  if (typeof window !== 'undefined') {
-    localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(updated));
-  }
-  return newBooking;
-}
-
-// Update booking status (Confirmed, Cancelled, Completed, Pending)
-export function updateBookingStatus(id: string, status: Booking['status']): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    const bookings = getBookings();
-    const updated = bookings.map((b) => (b.id === id ? { ...b, status } : b));
-    localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(updated));
-    return true;
-  } catch (e) {
-    console.error('Error updating booking status:', e);
-    return false;
-  }
-}
-
-// Delete a booking
-export function deleteBooking(id: string): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    const bookings = getBookings();
-    const updated = bookings.filter((b) => b.id !== id);
-    localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(updated));
-    return true;
-  } catch (e) {
-    console.error('Error deleting booking:', e);
-    return false;
-  }
 }
 
 // Dispatch real-time orders update event across components and tabs
 export function dispatchOrdersUpdated(orderId?: string, status?: string): void {
   if (typeof window === 'undefined') return;
   try {
-    // Setting timestamp in localStorage automatically triggers 'storage' event in other browser tabs
     localStorage.setItem(STORAGE_KEYS.LAST_UPDATED, Date.now().toString());
-    // Dispatch local custom event for current window
     window.dispatchEvent(
       new CustomEvent('hedgehog_orders_updated', {
         detail: { orderId, status, timestamp: Date.now() },
@@ -578,9 +514,316 @@ export function subscribeToOrders(callback: (detail?: { orderId?: string; status
   };
 }
 
-// FOOD ORDERS MANAGEMENT
+// ============================================================
+// SUPABASE SYNC LOGIC (Cloud + Local Dual-Sync)
+// ============================================================
 
-// Get all food orders
+/**
+ * Synchronize Orders from Supabase Cloud Database into local cache
+ */
+export async function syncOrdersFromSupabase(): Promise<FoodOrder[]> {
+  const client = getSupabaseClient();
+  if (!client) return getFoodOrders();
+
+  try {
+    const { data, error } = await client
+      .from('orders')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('Supabase fetch orders warning:', error.message);
+      return getFoodOrders();
+    }
+
+    if (data && Array.isArray(data)) {
+      const mappedOrders: FoodOrder[] = data.map((d: any) => ({
+        id: d.id,
+        customerName: d.customer_name,
+        phone: formatPhoneNumber(d.phone),
+        email: d.email || undefined,
+        address: d.address,
+        city: d.city || 'Chandigarh',
+        orderType: (d.order_type as FoodOrder['orderType']) || 'Delivery',
+        tableNumber: d.table_number || undefined,
+        items: Array.isArray(d.items) ? d.items : typeof d.items === 'string' ? JSON.parse(d.items) : [],
+        subtotal: Number(d.subtotal) || 0,
+        deliveryFee: Number(d.delivery_fee) || 0,
+        totalAmount: Number(d.total_amount) || 0,
+        paymentMethod: (d.payment_method as FoodOrder['paymentMethod']) || 'UPI on Delivery',
+        notes: d.notes || undefined,
+        status: (d.status as FoodOrder['status']) || 'New',
+        createdAt: d.created_at,
+      }));
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(STORAGE_KEYS.FOOD_ORDERS, JSON.stringify(mappedOrders));
+      }
+      dispatchOrdersUpdated();
+      return mappedOrders;
+    }
+  } catch (err) {
+    console.error('Failed to sync orders from Supabase:', err);
+  }
+
+  return getFoodOrders();
+}
+
+/**
+ * Synchronize Bookings from Supabase Cloud Database into local cache
+ */
+export async function syncBookingsFromSupabase(): Promise<Booking[]> {
+  const client = getSupabaseClient();
+  if (!client) return getBookings();
+
+  try {
+    const { data, error } = await client
+      .from('bookings')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('Supabase fetch bookings warning:', error.message);
+      return getBookings();
+    }
+
+    if (data && Array.isArray(data)) {
+      const mappedBookings: Booking[] = data.map((d: any) => ({
+        id: d.id,
+        name: d.name,
+        phone: formatPhoneNumber(d.phone),
+        email: d.email || undefined,
+        guests: d.guests || '2',
+        date: d.date,
+        timeSlot: d.time_slot,
+        seatingPreference: d.seating_preference || 'Near Bookshelves',
+        notes: d.notes || undefined,
+        status: (d.status as Booking['status']) || 'Pending',
+        createdAt: d.created_at,
+      }));
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(mappedBookings));
+      }
+      return mappedBookings;
+    }
+  } catch (err) {
+    console.error('Failed to sync bookings from Supabase:', err);
+  }
+
+  return getBookings();
+}
+
+/**
+ * Synchronize Website Settings from Supabase
+ */
+export async function syncWebsiteSettingsFromSupabase(): Promise<WebsiteSettings> {
+  const client = getSupabaseClient();
+  if (!client) return getWebsiteSettings();
+
+  try {
+    const { data, error } = await client
+      .from('website_settings')
+      .select('*')
+      .eq('id', 'default')
+      .single();
+
+    if (error) {
+      return getWebsiteSettings();
+    }
+
+    if (data) {
+      const current = getWebsiteSettings();
+      const updated: WebsiteSettings = {
+        ...current,
+        isWebsiteOnline: data.is_online ?? true,
+        offlineReason: data.offline_reason || '',
+        announcementBanner: data.announcement
+          ? { enabled: true, text: data.announcement, type: 'special' }
+          : current.announcementBanner,
+        lastModifiedAt: data.updated_at || new Date().toISOString(),
+      };
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(STORAGE_KEYS.WEBSITE_SETTINGS, JSON.stringify(updated));
+        window.dispatchEvent(new CustomEvent('hedgehog_settings_updated', { detail: { settings: updated } }));
+      }
+      return updated;
+    }
+  } catch (err) {
+    console.error('Failed to sync website settings from Supabase:', err);
+  }
+
+  return getWebsiteSettings();
+}
+
+let isRealtimeInitialized = false;
+
+/**
+ * Initialize Supabase Realtime Channels for automatic instant sync
+ */
+export function initSupabaseRealtime(): (() => void) | undefined {
+  if (typeof window === 'undefined') return;
+  const client = getSupabaseClient();
+  if (!client) return;
+
+  if (isRealtimeInitialized) return;
+  isRealtimeInitialized = true;
+
+  // Trigger immediate cloud pull
+  syncOrdersFromSupabase();
+  syncBookingsFromSupabase();
+  syncWebsiteSettingsFromSupabase();
+
+  try {
+    const channel = client
+      .channel('hedgehog_cafe_live_channel')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders' },
+        (payload) => {
+          console.log('⚡ Supabase Realtime: Order event received', payload);
+          syncOrdersFromSupabase();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings' },
+        (payload) => {
+          console.log('⚡ Supabase Realtime: Booking event received', payload);
+          syncBookingsFromSupabase();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'website_settings' },
+        (payload) => {
+          console.log('⚡ Supabase Realtime: Settings event received', payload);
+          syncWebsiteSettingsFromSupabase();
+        }
+      )
+      .subscribe((status) => {
+        console.log('⚡ Supabase Realtime subscription status:', status);
+      });
+
+    return () => {
+      isRealtimeInitialized = false;
+      client.removeChannel(channel);
+    };
+  } catch (e) {
+    console.error('Failed to initialize Supabase Realtime channel:', e);
+  }
+}
+
+// ============================================================
+// BOOKINGS MANAGEMENT
+// ============================================================
+
+export function getBookings(): Booking[] {
+  if (typeof window === 'undefined') return INITIAL_BOOKINGS;
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.BOOKINGS);
+    if (!raw) {
+      localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(INITIAL_BOOKINGS));
+      return INITIAL_BOOKINGS;
+    }
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('Error fetching bookings:', e);
+    return INITIAL_BOOKINGS;
+  }
+}
+
+export function saveBooking(booking: Omit<Booking, 'id' | 'createdAt' | 'status'> & { status?: Booking['status'] }): Booking {
+  const bookings = getBookings();
+  const newBooking: Booking = {
+    ...booking,
+    phone: formatPhoneNumber(booking.phone),
+    id: 'BK-' + Math.floor(1000 + Math.random() * 9000),
+    status: booking.status || 'Pending',
+    createdAt: new Date().toISOString(),
+  };
+
+  const updated = [newBooking, ...bookings];
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(updated));
+  }
+
+  // Push asynchronously to Supabase
+  const client = getSupabaseClient();
+  if (client) {
+    client
+      .from('bookings')
+      .insert({
+        id: newBooking.id,
+        name: newBooking.name,
+        phone: newBooking.phone,
+        email: newBooking.email || null,
+        guests: newBooking.guests,
+        date: newBooking.date,
+        time_slot: newBooking.timeSlot,
+        seating_preference: newBooking.seatingPreference,
+        notes: newBooking.notes || null,
+        status: newBooking.status,
+        created_at: newBooking.createdAt,
+      })
+      .then(({ error }) => {
+        if (error) console.error('Supabase save booking error:', error);
+      });
+  }
+
+  return newBooking;
+}
+
+export function updateBookingStatus(id: string, status: Booking['status']): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const bookings = getBookings();
+    const updated = bookings.map((b) => (b.id === id ? { ...b, status } : b));
+    localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(updated));
+
+    // Update in Supabase
+    const client = getSupabaseClient();
+    if (client) {
+      client.from('bookings').update({ status }).eq('id', id).then(({ error }) => {
+        if (error) console.error('Supabase update booking status error:', error);
+      });
+    }
+
+    return true;
+  } catch (e) {
+    console.error('Error updating booking status:', e);
+    return false;
+  }
+}
+
+export function deleteBooking(id: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const bookings = getBookings();
+    const updated = bookings.filter((b) => b.id !== id);
+    localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(updated));
+
+    // Delete in Supabase
+    const client = getSupabaseClient();
+    if (client) {
+      client.from('bookings').delete().eq('id', id).then(({ error }) => {
+        if (error) console.error('Supabase delete booking error:', error);
+      });
+    }
+
+    return true;
+  } catch (e) {
+    console.error('Error deleting booking:', e);
+    return false;
+  }
+}
+
+// ============================================================
+// FOOD ORDERS MANAGEMENT
+// ============================================================
+
 export function getFoodOrders(): FoodOrder[] {
   if (typeof window === 'undefined') return INITIAL_ORDERS;
 
@@ -601,7 +844,6 @@ export function getFoodOrders(): FoodOrder[] {
   }
 }
 
-// Get single food order by ID
 export function getFoodOrderById(id: string): FoodOrder | null {
   if (!id) return null;
   const orders = getFoodOrders();
@@ -617,7 +859,6 @@ export function getFoodOrderById(id: string): FoodOrder | null {
   );
 }
 
-// Customer Saved Order IDs
 export function getCustomerOrderIds(): string[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -628,14 +869,12 @@ export function getCustomerOrderIds(): string[] {
   }
 }
 
-// Customer Placed Orders list (retrieves full order objects for customer)
 export function getCustomerOrders(): FoodOrder[] {
   const allOrders = getFoodOrders();
   const customerIds = getCustomerOrderIds();
   const customerPhone = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.CUSTOMER_PHONE) || '' : '';
   const cleanCustomerPhone = customerPhone.replace(/[^0-9]/g, '').slice(-10);
 
-  // Return orders matching stored customer IDs or stored phone
   const matched = allOrders.filter((o) => {
     if (customerIds.includes(o.id)) return true;
     if (cleanCustomerPhone && cleanCustomerPhone.length === 10 && o.phone) {
@@ -648,7 +887,6 @@ export function getCustomerOrders(): FoodOrder[] {
   return matched;
 }
 
-// Save customer's newly placed order ID to local customer history
 export function saveCustomerPlacedOrder(order: FoodOrder): void {
   if (typeof window === 'undefined') return;
   try {
@@ -666,7 +904,6 @@ export function saveCustomerPlacedOrder(order: FoodOrder): void {
   }
 }
 
-// Find orders by Phone or ID (for search/lookup)
 export function findOrdersByQuery(query: string): FoodOrder[] {
   if (!query || !query.trim()) return [];
   const allOrders = getFoodOrders();
@@ -674,21 +911,16 @@ export function findOrdersByQuery(query: string): FoodOrder[] {
   const qDigits = q.replace(/[^0-9]/g, '');
 
   return allOrders.filter((o) => {
-    // Check Order ID match
     if (o.id.toLowerCase().includes(q)) return true;
     if (qDigits.length >= 3 && o.id.replace(/[^0-9]/g, '').includes(qDigits)) return true;
-    
-    // Check Phone number match
     const phoneDigits = o.phone.replace(/[^0-9]/g, '');
     if (qDigits.length >= 4 && phoneDigits.includes(qDigits)) return true;
-    
-    // Check Customer Name match
     if (o.customerName.toLowerCase().includes(q)) return true;
     return false;
   });
 }
 
-// Save a new food order
+// Save a new food order (dual write to local and Supabase)
 export function saveFoodOrder(order: Omit<FoodOrder, 'id' | 'createdAt' | 'status'> & { status?: FoodOrder['status'] }): FoodOrder {
   const orders = getFoodOrders();
   const newOrder: FoodOrder = {
@@ -704,8 +936,40 @@ export function saveFoodOrder(order: Omit<FoodOrder, 'id' | 'createdAt' | 'statu
     localStorage.setItem(STORAGE_KEYS.FOOD_ORDERS, JSON.stringify(updated));
   }
   
-  // Track as customer order and broadcast update
   saveCustomerPlacedOrder(newOrder);
+
+  // Push to Supabase Cloud Database
+  const client = getSupabaseClient();
+  if (client) {
+    client
+      .from('orders')
+      .insert({
+        id: newOrder.id,
+        customer_name: newOrder.customerName,
+        phone: newOrder.phone,
+        email: newOrder.email || null,
+        address: newOrder.address,
+        city: newOrder.city || 'Chandigarh',
+        order_type: newOrder.orderType,
+        table_number: newOrder.tableNumber || null,
+        items: newOrder.items,
+        subtotal: newOrder.subtotal,
+        delivery_fee: newOrder.deliveryFee,
+        total_amount: newOrder.totalAmount,
+        payment_method: newOrder.paymentMethod,
+        notes: newOrder.notes || null,
+        status: newOrder.status,
+        created_at: newOrder.createdAt,
+      })
+      .then(({ error }) => {
+        if (error) {
+          console.error('Supabase save order error:', error);
+        } else {
+          console.log('✅ Order saved to Supabase cloud successfully:', newOrder.id);
+        }
+      });
+  }
+
   return newOrder;
 }
 
@@ -717,6 +981,15 @@ export function updateFoodOrderStatus(id: string, status: FoodOrder['status']): 
     const updated = orders.map((o) => (o.id === id ? { ...o, status } : o));
     localStorage.setItem(STORAGE_KEYS.FOOD_ORDERS, JSON.stringify(updated));
     dispatchOrdersUpdated(id, status);
+
+    // Update in Supabase
+    const client = getSupabaseClient();
+    if (client) {
+      client.from('orders').update({ status }).eq('id', id).then(({ error }) => {
+        if (error) console.error('Supabase update order status error:', error);
+      });
+    }
+
     return true;
   } catch (e) {
     console.error('Error updating order status:', e);
@@ -732,6 +1005,15 @@ export function deleteFoodOrder(id: string): boolean {
     const updated = orders.filter((o) => o.id !== id);
     localStorage.setItem(STORAGE_KEYS.FOOD_ORDERS, JSON.stringify(updated));
     dispatchOrdersUpdated(id, 'Deleted');
+
+    // Delete in Supabase
+    const client = getSupabaseClient();
+    if (client) {
+      client.from('orders').delete().eq('id', id).then(({ error }) => {
+        if (error) console.error('Supabase delete order error:', error);
+      });
+    }
+
     return true;
   } catch (e) {
     console.error('Error deleting order:', e);
@@ -760,43 +1042,29 @@ const INITIAL_ADMINS: AdminAccount[] = [
     role: 'Store Manager',
     passcode: '12345678',
     status: 'Active',
-    createdAt: new Date(Date.now() - 86400000 * 15).toISOString(),
-    lastLogin: new Date(Date.now() - 3600000 * 2).toISOString(),
+    createdAt: new Date(Date.now() - 86400000 * 20).toISOString(),
+    lastLogin: new Date().toISOString(),
     phone: '+91 98140 11223',
-    notes: 'Handles floor management, customer orders and table reservations.',
+    notes: 'Floor manager handling orders, customer reservations and delivery dispatches.',
   },
   {
     id: 'ADM-003',
-    name: 'Chef Ravinder (Kitchen KDS)',
-    username: 'kitchen_lead',
-    role: 'Kitchen Admin',
-    passcode: 'kitchen777',
+    name: 'Chef Gurpreet (Kitchen)',
+    username: 'chef_gurpreet',
+    role: 'Kitchen Lead',
+    passcode: '5555',
     status: 'Active',
-    createdAt: new Date(Date.now() - 86400000 * 10).toISOString(),
-    lastLogin: new Date(Date.now() - 3600000 * 6).toISOString(),
-    phone: '+91 98888 33445',
-    notes: 'Kitchen display system supervisor for order preparation tracking.',
-  },
-  {
-    id: 'ADM-004',
-    name: 'Simran Kaur (Front Desk)',
-    username: 'simran_desk',
-    role: 'Reservation Staff',
-    passcode: 'desk2026',
-    status: 'Active',
-    createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
-    lastLogin: new Date(Date.now() - 3600000 * 18).toISOString(),
-    phone: '+91 99150 77889',
-    notes: 'Manages book club seating and table reservations.',
+    createdAt: new Date(Date.now() - 86400000 * 15).toISOString(),
+    lastLogin: new Date().toISOString(),
+    phone: '+91 98888 22334',
+    notes: 'Kitchen display screen access for live pasta, pizza and coffee preparation.',
   },
 ];
 
-// INITIAL WEBSITE GLOBAL SETTINGS
 const INITIAL_SETTINGS: WebsiteSettings = {
   isWebsiteOnline: true,
-  maintenanceMessage: 'The Hedgehog Café website is currently under scheduled maintenance and kitchen prep. We will be back live shortly!',
+  offlineReason: '',
   isOrderingEnabled: true,
-  orderingDisabledMessage: 'Online delivery orders are currently paused for today due to peak kitchen rush. Please visit us in Sector 7-C!',
   isReservationsEnabled: true,
   announcementBanner: {
     enabled: true,
@@ -807,7 +1075,6 @@ const INITIAL_SETTINGS: WebsiteSettings = {
   lastModifiedAt: new Date().toISOString(),
 };
 
-// INITIAL AUDIT LOGS
 const INITIAL_AUDIT_LOGS: AuditLog[] = [
   {
     id: 'AUD-901',
@@ -843,11 +1110,6 @@ const INITIAL_AUDIT_LOGS: AuditLog[] = [
   },
 ];
 
-// ==========================================
-// SUPER ADMIN & WEBSITE CONTROLS
-// ==========================================
-
-// Get Website Global Settings
 export function getWebsiteSettings(): WebsiteSettings {
   if (typeof window === 'undefined') return INITIAL_SETTINGS;
   try {
@@ -863,7 +1125,6 @@ export function getWebsiteSettings(): WebsiteSettings {
   }
 }
 
-// Save Website Global Settings
 export function saveWebsiteSettings(
   settings: Partial<WebsiteSettings>,
   modifiedBy: string = 'Super Admin'
@@ -886,6 +1147,23 @@ export function saveWebsiteSettings(
     );
   }
 
+  // Update in Supabase
+  const client = getSupabaseClient();
+  if (client) {
+    client
+      .from('website_settings')
+      .upsert({
+        id: 'default',
+        is_online: updated.isWebsiteOnline,
+        offline_reason: updated.offlineReason || '',
+        announcement: updated.announcementBanner?.enabled ? updated.announcementBanner.text : '',
+        updated_at: updated.lastModifiedAt,
+      })
+      .then(({ error }) => {
+        if (error) console.error('Supabase update settings error:', error);
+      });
+  }
+
   recordAuditLog(
     'SETTINGS',
     'Website Settings Updated',
@@ -896,7 +1174,6 @@ export function saveWebsiteSettings(
   return updated;
 }
 
-// Turn Entire Website ON or OFF (Maintenance Switch)
 export function toggleWebsitePower(isOnline: boolean, modifiedBy: string = 'Super Admin'): WebsiteSettings {
   const updated = saveWebsiteSettings({ isWebsiteOnline: isOnline }, modifiedBy);
   recordAuditLog(
@@ -908,7 +1185,6 @@ export function toggleWebsitePower(isOnline: boolean, modifiedBy: string = 'Supe
   return updated;
 }
 
-// Subscribe to Website Settings Updates
 export function subscribeToWebsiteSettings(callback: (settings: WebsiteSettings) => void): () => void {
   if (typeof window === 'undefined') return () => {};
 
@@ -936,11 +1212,6 @@ export function subscribeToWebsiteSettings(callback: (settings: WebsiteSettings)
   };
 }
 
-// ==========================================
-// ADMIN ACCOUNTS MANAGEMENT (SUPER ADMIN)
-// ==========================================
-
-// Get All Admin Accounts
 export function getAdminAccounts(): AdminAccount[] {
   if (typeof window === 'undefined') return INITIAL_ADMINS;
   try {
@@ -956,7 +1227,6 @@ export function getAdminAccounts(): AdminAccount[] {
   }
 }
 
-// Create New Admin Account (Super Admin only)
 export function saveAdminAccount(
   account: Omit<AdminAccount, 'id' | 'createdAt'>,
   performedBy: string = 'Super Admin'
@@ -983,7 +1253,6 @@ export function saveAdminAccount(
   return newAccount;
 }
 
-// Update Admin Account
 export function updateAdminAccount(
   id: string,
   updates: Partial<AdminAccount>,
@@ -1012,7 +1281,6 @@ export function updateAdminAccount(
   }
 }
 
-// Delete Admin Account (Super Admin only)
 export function deleteAdminAccount(id: string, performedBy: string = 'Super Admin'): boolean {
   if (typeof window === 'undefined') return false;
   try {
@@ -1020,7 +1288,6 @@ export function deleteAdminAccount(id: string, performedBy: string = 'Super Admi
     const target = admins.find((a) => a.id === id);
     if (!target) return false;
 
-    // Prevent deleting the primary super admin
     if (target.role === 'Super Admin' && admins.filter((a) => a.role === 'Super Admin').length <= 1) {
       alert('Cannot delete the primary Super Admin account.');
       return false;
@@ -1042,10 +1309,6 @@ export function deleteAdminAccount(id: string, performedBy: string = 'Super Admi
     return false;
   }
 }
-
-// ==========================================
-// AUDIT LOGS
-// ==========================================
 
 export function getAuditLogs(): AuditLog[] {
   if (typeof window === 'undefined') return INITIAL_AUDIT_LOGS;
@@ -1080,16 +1343,12 @@ export function recordAuditLog(
       timestamp: new Date().toISOString(),
     };
 
-    const updated = [newLog, ...current].slice(0, 150); // Keep last 150 logs
+    const updated = [newLog, ...current].slice(0, 150);
     localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(updated));
   } catch (e) {
     console.error('Error recording audit log:', e);
   }
 }
-
-// ==========================================
-// UNIFIED AUTHENTICATION SYSTEM
-// ==========================================
 
 export function authenticateAdmin(password: string): {
   success: boolean;
@@ -1098,7 +1357,6 @@ export function authenticateAdmin(password: string): {
 } {
   const cleanPass = password.trim();
 
-  // 1. Check Master Super Admin Password: 123456789
   if (cleanPass === '123456789') {
     const admins = getAdminAccounts();
     const superAdmin = admins.find((a) => a.role === 'Super Admin') || INITIAL_ADMINS[0];
@@ -1106,7 +1364,6 @@ export function authenticateAdmin(password: string): {
     return { success: true, account: superAdmin, isSuperAdmin: true };
   }
 
-  // 2. Check Default Regular Admin Password: 12345678
   if (cleanPass === '12345678') {
     const admins = getAdminAccounts();
     const defaultAdmin = admins.find((a) => a.passcode === '12345678') || INITIAL_ADMINS[1];
@@ -1114,7 +1371,6 @@ export function authenticateAdmin(password: string): {
     return { success: true, account: defaultAdmin, isSuperAdmin: false };
   }
 
-  // 3. Check custom admin accounts created by Super Admin
   const admins = getAdminAccounts();
   const matched = admins.find((a) => a.passcode === cleanPass && a.status === 'Active');
   if (matched) {
@@ -1131,7 +1387,6 @@ export function authenticateAdmin(password: string): {
   return { success: false, isSuperAdmin: false };
 }
 
-// Reset data to defaults
 export function resetDemoData(): void {
   if (typeof window === 'undefined') return;
   localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(INITIAL_BOOKINGS));
@@ -1142,4 +1397,3 @@ export function resetDemoData(): void {
   localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(INITIAL_AUDIT_LOGS));
   dispatchOrdersUpdated();
 }
-
