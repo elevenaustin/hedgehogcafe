@@ -5,21 +5,28 @@ const STORAGE_KEYS = {
   SUPABASE_ANON_KEY: 'hedgehog_supabase_anon_key',
 };
 
+// Default Supabase project credentials for The Hedgehog Café
+export const DEFAULT_SUPABASE_URL = 'https://hfrfsztcsuoyllgbjclj.supabase.co';
+export const DEFAULT_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhmcmZzenRjc3VveWxsZ2JqY2xqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0Njg2MzIsImV4cCI6MjEwNzA0NDYzMn0.y2pzfFwQIAk74vejrBq48A2h_y52eCXVN6fzTOyV2Cg';
+
 let cachedClient: SupabaseClient | null = null;
 let lastUrl: string = '';
 let lastKey: string = '';
 
 /**
- * Get current Supabase credentials (from Vite env or localStorage)
+ * Get current Supabase credentials (from Vite env, localStorage, or embedded default)
  */
 export function getSupabaseConfig(): { url: string; anonKey: string; isConfigured: boolean } {
-  let url = '';
-  let anonKey = '';
+  let url = DEFAULT_SUPABASE_URL;
+  let anonKey = DEFAULT_SUPABASE_ANON_KEY;
 
   // 1. Check Vite Environment Variables
   if (typeof import.meta !== 'undefined' && import.meta.env) {
-    url = (import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL || '').trim();
-    anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY || '').trim();
+    const envUrl = (import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL || '').trim();
+    const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY || '').trim();
+    if (envUrl) url = envUrl;
+    if (envKey) anonKey = envKey;
   }
 
   // 2. Check localStorage override (configured via Super Admin UI)
@@ -70,7 +77,7 @@ export function saveSupabaseConfig(url: string, anonKey: string): void {
 }
 
 /**
- * Clear custom Supabase credentials
+ * Clear custom Supabase credentials (resets to default)
  */
 export function clearSupabaseConfig(): void {
   if (typeof window === 'undefined') return;
@@ -129,7 +136,6 @@ export async function testSupabaseConnection(): Promise<{ success: boolean; mess
   }
 
   try {
-    // Try querying orders table
     const { data, error } = await client.from('orders').select('id').limit(1);
 
     if (error) {
