@@ -1,0 +1,6 @@
+{
+  "name": "The Hedgehog Café",
+  "description": "A cozy literary book café in Sector 7-C, Chandigarh. Settle in with specialty coffee, artisan pasta, burgers, breakfast, and thousands of books in a warm, wood-panelled haven.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
