@@ -111,23 +111,13 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate, onOpenReservatio
       
       {/* 1. HERO SECTION (EXACT REFERENCE DESIGN) */}
       <section className="relative w-full min-h-[520px] sm:min-h-[580px] lg:min-h-[640px] flex items-center justify-start overflow-hidden">
-        {/* Background Restaurant Video */}
+        {/* Background Restaurant Photo */}
         <div className="absolute inset-0 z-0 overflow-hidden">
-          <video
-            autoPlay
-            loop
-            muted
-            playsInline
+          <img
+            src="/images/hero-banner.jpg"
+            alt="The Hedgehog Cafe Warm Cozy Interior"
             className="w-full h-full object-cover object-center scale-105"
-          >
-            <source src="/videos/hero-background.mp4" type="video/mp4" />
-            {/* Fallback image if video cannot play */}
-            <img
-              src="https://images.unsplash.com/photo-1554118811-1e0d58224f24?auto=format&fit=crop&w=1920&q=85"
-              alt="The Hedgehog Cafe Interior"
-              className="w-full h-full object-cover object-center"
-            />
-          </video>
+          />
           {/* Subtle Dark Gradient Overlay */}
           <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/60 to-black/35" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-black/25" />
