@@ -23,6 +23,7 @@ import {
   getSupabaseConfig,
   syncOrdersFromSupabase,
   syncBookingsFromSupabase,
+  subscribeToOrders,
 } from '../services/adminStorage';
 import { SuperAdminView } from './SuperAdminView';
 import { HedgehogLogo } from './HedgehogMotif';
@@ -105,8 +106,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose, onNavigateHome 
   const [websiteSettings, setWebsiteSettings] = useState<WebsiteSettings>(() => getWebsiteSettings());
 
   // Data States
-  const [foodOrders, setFoodOrders] = useState<FoodOrder[]>([]);
-  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [foodOrders, setFoodOrders] = useState<FoodOrder[]>(() => getFoodOrders());
+  const [bookings, setBookings] = useState<Booking[]>(() => getBookings());
   const [visitorStats, setVisitorStats] = useState<VisitorStats | null>(null);
 
   // Filters for Orders
@@ -145,26 +146,39 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose, onNavigateHome 
   const [supabaseConfig, setSupabaseConfig] = useState(() => getSupabaseConfig());
 
   // Load Data on mount or tab change (with live background cloud sync)
-  const refreshData = () => {
+  const refreshData = (showToastNotice = false) => {
     setFoodOrders(getFoodOrders());
     setBookings(getBookings());
     setVisitorStats(getVisitorStats());
     setWebsiteSettings(getWebsiteSettings());
     setSupabaseConfig(getSupabaseConfig());
 
-    // Pull real-time data from Supabase
+    // Pull real-time data from Supabase Cloud
     syncOrdersFromSupabase().then((latest) => {
-      if (latest && latest.length > 0) setFoodOrders(latest);
+      if (latest) setFoodOrders(latest);
     });
     syncBookingsFromSupabase().then((latest) => {
-      if (latest && latest.length > 0) setBookings(latest);
+      if (latest) setBookings(latest);
     });
+
+    if (showToastNotice) {
+      showToast('⚡ Live Cloud Data Refreshed!', 'success');
+    }
   };
 
+  // Real-time event subscription across tabs and database inserts
+  useEffect(() => {
+    const unsub = subscribeToOrders(() => {
+      setFoodOrders(getFoodOrders());
+    });
+    return () => unsub();
+  }, []);
+
+  // Poll cloud database every 3 seconds for new customer orders across all devices/networks
   useEffect(() => {
     if (isAuthenticated) {
-      refreshData();
-      const interval = setInterval(refreshData, 8000); // Live poll every 8s
+      refreshData(false);
+      const interval = setInterval(() => refreshData(false), 3000);
       return () => clearInterval(interval);
     }
   }, [isAuthenticated]);
@@ -190,6 +204,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose, onNavigateHome 
       sessionStorage.setItem('hedgehog_admin_name', adminName);
 
       setAuthError('');
+      refreshData(false);
+
       if (result.isSuperAdmin) {
         setActiveTab('super_admin');
         showToast('👑 Welcome Super Admin! Master Website Access Granted.', 'success');
@@ -622,7 +638,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose, onNavigateHome 
             </div>
 
             <button
-              onClick={refreshData}
+              onClick={() => refreshData(true)}
               title="Refresh & Pull Cloud Data"
               className="p-2 rounded-lg bg-[#2D241E] hover:bg-[#3D3128] text-[#D9CFC1] hover:text-white transition-colors border border-[#4A3C32] cursor-pointer"
             >

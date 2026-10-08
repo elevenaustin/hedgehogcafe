@@ -720,19 +720,53 @@ export function initSupabaseRealtime(): (() => void) | undefined {
 // ============================================================
 
 export function getBookings(): Booking[] {
-  if (typeof window === 'undefined') return INITIAL_BOOKINGS;
+  if (typeof window === 'undefined') return [];
 
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.BOOKINGS);
     if (!raw) {
-      localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(INITIAL_BOOKINGS));
-      return INITIAL_BOOKINGS;
+      syncBookingsFromSupabase();
+      return [];
     }
     return JSON.parse(raw);
   } catch (e) {
     console.error('Error fetching bookings:', e);
-    return INITIAL_BOOKINGS;
+    return [];
   }
+}
+
+export async function saveBookingAsync(
+  booking: Omit<Booking, 'id' | 'createdAt' | 'status'> & { status?: Booking['status'] }
+): Promise<Booking> {
+  const newBooking = saveBooking(booking);
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      const { error } = await client
+        .from('bookings')
+        .insert({
+          id: newBooking.id,
+          name: newBooking.name,
+          phone: newBooking.phone,
+          email: newBooking.email || null,
+          guests: newBooking.guests,
+          date: newBooking.date,
+          time_slot: newBooking.timeSlot,
+          seating_preference: newBooking.seatingPreference,
+          notes: newBooking.notes || null,
+          status: newBooking.status,
+          created_at: newBooking.createdAt,
+        });
+      if (error) {
+        console.error('Supabase saveBookingAsync error:', error);
+      } else {
+        console.log('✅ Booking synced to Supabase Cloud:', newBooking.id);
+      }
+    } catch (err) {
+      console.error('Network error during booking sync:', err);
+    }
+  }
+  return newBooking;
 }
 
 export function saveBooking(booking: Omit<Booking, 'id' | 'createdAt' | 'status'> & { status?: Booking['status'] }): Booking {
@@ -825,13 +859,13 @@ export function deleteBooking(id: string): boolean {
 // ============================================================
 
 export function getFoodOrders(): FoodOrder[] {
-  if (typeof window === 'undefined') return INITIAL_ORDERS;
+  if (typeof window === 'undefined') return [];
 
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.FOOD_ORDERS);
     if (!raw) {
-      localStorage.setItem(STORAGE_KEYS.FOOD_ORDERS, JSON.stringify(INITIAL_ORDERS));
-      return INITIAL_ORDERS;
+      syncOrdersFromSupabase();
+      return [];
     }
     const parsed: FoodOrder[] = JSON.parse(raw);
     return parsed.map((o) => ({
@@ -840,8 +874,48 @@ export function getFoodOrders(): FoodOrder[] {
     }));
   } catch (e) {
     console.error('Error fetching food orders:', e);
-    return INITIAL_ORDERS;
+    return [];
   }
+}
+
+export async function getFoodOrderByIdAsync(id: string): Promise<FoodOrder | null> {
+  if (!id) return null;
+  const localOrder = getFoodOrderById(id);
+  if (localOrder) return localOrder;
+
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from('orders')
+        .select('*')
+        .eq('id', id.trim().toUpperCase())
+        .single();
+      if (!error && data) {
+        return {
+          id: data.id,
+          customerName: data.customer_name,
+          phone: formatPhoneNumber(data.phone),
+          email: data.email || undefined,
+          address: data.address,
+          city: data.city || 'Chandigarh',
+          orderType: (data.order_type as FoodOrder['orderType']) || 'Delivery',
+          tableNumber: data.table_number || undefined,
+          items: Array.isArray(data.items) ? data.items : typeof data.items === 'string' ? JSON.parse(data.items) : [],
+          subtotal: Number(data.subtotal) || 0,
+          deliveryFee: Number(data.delivery_fee) || 0,
+          totalAmount: Number(data.total_amount) || 0,
+          paymentMethod: (data.payment_method as FoodOrder['paymentMethod']) || 'UPI on Delivery',
+          notes: data.notes || undefined,
+          status: (data.status as FoodOrder['status']) || 'New',
+          createdAt: data.created_at,
+        };
+      }
+    } catch (err) {
+      console.warn('Async order lookup error:', err);
+    }
+  }
+  return null;
 }
 
 export function getFoodOrderById(id: string): FoodOrder | null {
@@ -920,7 +994,49 @@ export function findOrdersByQuery(query: string): FoodOrder[] {
   });
 }
 
-// Save a new food order (dual write to local and Supabase)
+// Save a new food order asynchronously to Supabase cloud database with immediate local fallback
+export async function saveFoodOrderAsync(
+  order: Omit<FoodOrder, 'id' | 'createdAt' | 'status'> & { status?: FoodOrder['status'] }
+): Promise<FoodOrder> {
+  const newOrder = saveFoodOrder(order);
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      const { error } = await client
+        .from('orders')
+        .insert({
+          id: newOrder.id,
+          customer_name: newOrder.customerName,
+          phone: newOrder.phone,
+          email: newOrder.email || null,
+          address: newOrder.address,
+          city: newOrder.city || 'Chandigarh',
+          order_type: newOrder.orderType,
+          table_number: newOrder.tableNumber || null,
+          items: newOrder.items,
+          subtotal: newOrder.subtotal,
+          delivery_fee: newOrder.deliveryFee,
+          total_amount: newOrder.totalAmount,
+          payment_method: newOrder.paymentMethod,
+          notes: newOrder.notes || null,
+          status: newOrder.status,
+          created_at: newOrder.createdAt,
+        });
+
+      if (error) {
+        console.error('Supabase saveFoodOrderAsync error:', error);
+      } else {
+        console.log('✅ Order synced to Supabase Cloud:', newOrder.id);
+        dispatchOrdersUpdated(newOrder.id, newOrder.status);
+      }
+    } catch (err) {
+      console.error('Network error during food order sync:', err);
+    }
+  }
+  return newOrder;
+}
+
+// Save a new food order (synchronous cache write + background Supabase push)
 export function saveFoodOrder(order: Omit<FoodOrder, 'id' | 'createdAt' | 'status'> & { status?: FoodOrder['status'] }): FoodOrder {
   const orders = getFoodOrders();
   const newOrder: FoodOrder = {
@@ -931,14 +1047,14 @@ export function saveFoodOrder(order: Omit<FoodOrder, 'id' | 'createdAt' | 'statu
     createdAt: new Date().toISOString(),
   };
 
-  const updated = [newOrder, ...orders];
+  const updated = [newOrder, ...orders.filter((o) => o.id !== newOrder.id)];
   if (typeof window !== 'undefined') {
     localStorage.setItem(STORAGE_KEYS.FOOD_ORDERS, JSON.stringify(updated));
   }
   
   saveCustomerPlacedOrder(newOrder);
 
-  // Push to Supabase Cloud Database
+  // Push to Supabase Cloud Database asynchronously
   const client = getSupabaseClient();
   if (client) {
     client
@@ -966,6 +1082,7 @@ export function saveFoodOrder(order: Omit<FoodOrder, 'id' | 'createdAt' | 'statu
           console.error('Supabase save order error:', error);
         } else {
           console.log('✅ Order saved to Supabase cloud successfully:', newOrder.id);
+          dispatchOrdersUpdated(newOrder.id, newOrder.status);
         }
       });
   }

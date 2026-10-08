@@ -5,6 +5,7 @@ import {
   getFoodOrderById,
   findOrdersByQuery,
   subscribeToOrders,
+  syncOrdersFromSupabase,
   formatPhoneNumber
 } from '../services/adminStorage';
 import { BUSINESS_INFO } from '../data/cafeData';
@@ -87,6 +88,7 @@ export const CustomerOrdersModal: React.FC<CustomerOrdersModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     reloadOrders();
+    syncOrdersFromSupabase().then(() => reloadOrders());
 
     // Subscribe to storage & custom events for instant real-time sync
     const unsubscribe = subscribeToOrders((detail) => {

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useCart } from '../context/CartContext';
-import { saveFoodOrder, FoodOrder, isValidIndianPhone, formatPhoneNumber } from '../services/adminStorage';
+import { saveFoodOrderAsync, saveFoodOrder, FoodOrder, isValidIndianPhone, formatPhoneNumber } from '../services/adminStorage';
 import { BUSINESS_INFO, MENU_ITEMS } from '../data/cafeData';
 import { HedgehogMotif } from './HedgehogMotif';
 import {
@@ -23,7 +23,8 @@ import {
   ArrowRight,
   Info,
   AlertCircle,
-  Check
+  Check,
+  Loader2
 } from 'lucide-react';
 
 interface OrderModalProps {
@@ -64,7 +65,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, onNavig
     setPhoneTouched(true);
   };
 
-  const handleSubmitOrder = (e: React.FormEvent) => {
+  const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cartItems.length === 0) return;
     if (!formData.name.trim()) return;
@@ -83,24 +84,29 @@ export const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, onNavig
         ? `${formData.address}${formData.landmark ? ', Landmark: ' + formData.landmark : ''}`
         : 'Pickup at Café Counter (Sector 7-C)';
 
-    const newOrder = saveFoodOrder({
-      customerName: formData.name.trim(),
-      phone: formatPhoneNumber(formData.phone),
-      email: formData.email,
-      address: fullAddress,
-      orderType: orderType,
-      items: cartItems,
-      subtotal,
-      deliveryFee,
-      totalAmount,
-      paymentMethod: formData.paymentMethod,
-      notes: formData.notes,
-      status: 'New',
-    });
+    try {
+      const newOrder = await saveFoodOrderAsync({
+        customerName: formData.name.trim(),
+        phone: formatPhoneNumber(formData.phone),
+        email: formData.email,
+        address: fullAddress,
+        orderType: orderType,
+        items: cartItems,
+        subtotal,
+        deliveryFee,
+        totalAmount,
+        paymentMethod: formData.paymentMethod,
+        notes: formData.notes,
+        status: 'New',
+      });
 
-    clearCart();
-    setPlacedOrder(newOrder);
-    setIsSubmitting(false);
+      clearCart();
+      setPlacedOrder(newOrder);
+    } catch (err) {
+      console.error('Error submitting order:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleClose = () => {

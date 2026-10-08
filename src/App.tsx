@@ -21,6 +21,9 @@ import {
   getWebsiteSettings,
   subscribeToWebsiteSettings,
   initSupabaseRealtime,
+  syncOrdersFromSupabase,
+  syncBookingsFromSupabase,
+  syncWebsiteSettingsFromSupabase,
   WebsiteSettings
 } from './services/adminStorage';
 import { HedgehogLogo } from './components/HedgehogMotif';
@@ -46,11 +49,25 @@ function MainApp() {
   const [isBannerDismissed, setIsBannerDismissed] = useState(false);
   const { isCartOpen, setIsCartOpen, openCart, closeCart } = useCart();
 
-  // Initialize Supabase Cloud Live Realtime Sync
+  // Initialize Supabase Cloud Live Realtime Sync & Background Poller
   useEffect(() => {
     const unsubRealtime = initSupabaseRealtime();
+
+    // Trigger immediate pull
+    syncOrdersFromSupabase();
+    syncBookingsFromSupabase();
+    syncWebsiteSettingsFromSupabase();
+
+    // Redundant background sync every 8s to guarantee freshness across mobile networks
+    const interval = setInterval(() => {
+      syncOrdersFromSupabase();
+      syncBookingsFromSupabase();
+      syncWebsiteSettingsFromSupabase();
+    }, 8000);
+
     return () => {
       if (unsubRealtime) unsubRealtime();
+      clearInterval(interval);
     };
   }, []);
 

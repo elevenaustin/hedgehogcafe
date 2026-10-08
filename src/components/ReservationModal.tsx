@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { BUSINESS_INFO } from '../data/cafeData';
 import { X, Phone, Clock, Calendar, Users, CheckCircle, Info, Check, AlertCircle } from 'lucide-react';
 import { HedgehogMotif } from './HedgehogMotif';
-import { saveBooking, isValidIndianPhone, formatPhoneNumber } from '../services/adminStorage';
+import { saveBookingAsync, saveBooking, isValidIndianPhone, formatPhoneNumber } from '../services/adminStorage';
 
 interface ReservationModalProps {
   isOpen: boolean;
@@ -21,6 +21,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({ isOpen, onCl
   });
   const [phoneTouched, setPhoneTouched] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
 
@@ -32,7 +33,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({ isOpen, onCl
     setPhoneTouched(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name.trim()) return;
 
@@ -41,19 +42,26 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({ isOpen, onCl
       return;
     }
 
-    // Save reservation to Admin database
-    saveBooking({
-      name: formData.name.trim(),
-      phone: formatPhoneNumber(formData.phone),
-      guests: formData.guests,
-      date: formData.date || new Date().toISOString().split('T')[0],
-      timeSlot: formData.timeSlot,
-      seatingPreference: formData.seatingPreference,
-      notes: formData.notes,
-      status: 'Pending',
-    });
+    setIsSubmitting(true);
+    try {
+      // Save reservation directly to Supabase cloud database
+      await saveBookingAsync({
+        name: formData.name.trim(),
+        phone: formatPhoneNumber(formData.phone),
+        guests: formData.guests,
+        date: formData.date || new Date().toISOString().split('T')[0],
+        timeSlot: formData.timeSlot,
+        seatingPreference: formData.seatingPreference,
+        notes: formData.notes,
+        status: 'Pending',
+      });
 
-    setSubmitted(true);
+      setSubmitted(true);
+    } catch (err) {
+      console.error('Error saving reservation:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleReset = () => {
