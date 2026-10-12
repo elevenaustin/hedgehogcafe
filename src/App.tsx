@@ -233,7 +233,7 @@ function MainApp() {
   return (
     <div className="min-h-screen flex flex-col bg-[#FCFBF8] text-[#1F1A17]">
       {/* Global Broadcast Announcement Banner */}
-      {websiteSettings.announcementBanner.enabled && !isBannerDismissed && (
+      {websiteSettings.announcementBanner?.enabled && !isBannerDismissed && (
         <div
           className={`px-4 py-2 text-xs font-semibold flex items-center justify-between shadow-xs ${
             websiteSettings.announcementBanner.type === 'special'

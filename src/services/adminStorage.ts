@@ -126,12 +126,14 @@ export interface AdminAccount {
 export interface WebsiteSettings {
   isWebsiteOnline: boolean;
   offlineReason?: string;
+  maintenanceMessage?: string;
   isOrderingEnabled: boolean;
+  orderingDisabledMessage?: string;
   isReservationsEnabled: boolean;
-  announcementBanner?: {
+  announcementBanner: {
     enabled: boolean;
     text: string;
-    type: 'info' | 'warning' | 'special';
+    type: 'info' | 'warning' | 'special' | 'discount';
   };
   lastModifiedBy: string;
   lastModifiedAt: string;
@@ -1181,7 +1183,9 @@ const INITIAL_ADMINS: AdminAccount[] = [
 const INITIAL_SETTINGS: WebsiteSettings = {
   isWebsiteOnline: true,
   offlineReason: '',
+  maintenanceMessage: 'Our digital ordering system is currently undergoing scheduled maintenance. Please visit us directly or call us.',
   isOrderingEnabled: true,
+  orderingDisabledMessage: 'Online food ordering is temporarily paused right now.',
   isReservationsEnabled: true,
   announcementBanner: {
     enabled: true,
